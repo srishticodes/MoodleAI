@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Star, Zap, Sparkles } from 'lucide-react';
+import { pipeline } from '@xenova/transformers';
 
-const VirtualCompanion = ({ companion, streak, mood }) => {
+const VirtualCompanion = ({ companion, streak, mood, onSend }) => {
   const [companionMood, setCompanionMood] = useState('happy');
   const [message, setMessage] = useState('');
   const [isAnimating, setIsAnimating] = useState(false);
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState([
+    { from: 'companion', text: 'Hi! I am your virtual companion. How are you feeling today?' }
+  ]);
+  const [loading, setLoading] = useState(false);
+  const [generator, setGenerator] = useState(null);
 
   // Companion data
   const companionTypes = {
@@ -109,6 +116,16 @@ const VirtualCompanion = ({ companion, streak, mood }) => {
     return () => clearTimeout(timer);
   }, [companionMood]);
 
+  // Load the model on mount
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const pipe = await pipeline('text-generation', 'Xenova/distilgpt2');
+      if (isMounted) setGenerator(() => pipe);
+    })();
+    return () => { isMounted = false; };
+  }, []);
+
   const getCompanionEmoji = () => {
     switch (companionMood) {
       case 'excited': return currentCompanion.excitedEmoji;
@@ -127,6 +144,26 @@ const VirtualCompanion = ({ companion, streak, mood }) => {
   };
 
   const level = getCompanionLevel();
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+    setMessages([...messages, { from: 'user', text: input }]);
+    setLoading(true);
+    let reply = '...';
+    try {
+      if (generator) {
+        const output = await generator(input, { max_new_tokens: 40 });
+        reply = output[0]?.generated_text?.replace(input, '').trim() || 'I am here for you!';
+      } else {
+        reply = 'AI is loading, please wait...';
+      }
+    } catch (e) {
+      reply = 'Sorry, I could not process that right now.';
+    }
+    setMessages(msgs => [...msgs, { from: 'companion', text: reply }]);
+    setLoading(false);
+    setInput('');
+  };
 
   return (
     <div className="space-y-6">
@@ -300,6 +337,28 @@ const VirtualCompanion = ({ companion, streak, mood }) => {
             ))}
           </>
         )}
+      </div>
+
+      {/* Chat Interface */}
+      <div className="virtual-companion" style={{ border: '1px solid #eee', borderRadius: '8px', padding: '1rem', background: '#fafaff', marginBottom: '1rem' }}>
+        <div style={{ minHeight: '100px', marginBottom: '1rem' }}>
+          {messages.map((msg, idx) => (
+            <div key={idx} style={{ textAlign: msg.from === 'user' ? 'right' : 'left', margin: '0.5rem 0' }}>
+              <span style={{ background: msg.from === 'user' ? '#e0f7fa' : '#fce4ec', padding: '0.5rem 1rem', borderRadius: '16px', display: 'inline-block' }}>{msg.text}</span>
+            </div>
+          ))}
+          {loading && <div style={{ textAlign: 'left', color: '#888', fontStyle: 'italic' }}>Companion is thinking...</div>}
+        </div>
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          placeholder="Type your message..."
+          style={{ width: '80%', marginRight: '1rem', borderRadius: '8px', border: '1px solid #ccc', padding: '8px' }}
+          onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
+          disabled={loading}
+        />
+        <button onClick={handleSend} disabled={loading}>Send</button>
       </div>
     </div>
   );
